@@ -1,0 +1,6 @@
+core_material,size_nm,zeta_potential_mv,dosage_ug_ml,toxicity
+Gold,50,-25,100,0
+Silver,20,15,50,1
+ZincOxide,150,-10,200,1
+Silica,80,-40,10,0
+IronOxide,30,5,150,1

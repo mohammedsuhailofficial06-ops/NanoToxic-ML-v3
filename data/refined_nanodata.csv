@@ -1,0 +1,6 @@
+size_nm,zeta_potential_mv,dosage_ug_ml,toxicity,sv_ratio,core_material_Gold,core_material_IronOxide,core_material_Silica,core_material_Silver,core_material_ZincOxide
+50,-25,100,0,0.12,True,False,False,False,False
+20,15,50,1,0.3,False,False,False,True,False
+150,-10,200,1,0.04,False,False,False,False,True
+80,-40,10,0,0.075,False,False,True,False,False
+30,5,150,1,0.2,False,True,False,False,False
