@@ -5,18 +5,19 @@ import joblib
 import pandas as pd
 import os
 
-app = FastAPI()
+app = FastAPI(title="NanoToxic-ML 2.0 Engine")
 
-# 1. ALLOW PORTAL ACCESS (CORS)
+# 1. ALLOW GLOBAL ACCESS (CORS)
+# This is vital so your website can talk to your server
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"], 
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# 2. LOAD THE BRAIN
+# 2. LOAD THE BRAIN (The .pkl files)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 model_path = os.path.join(BASE_DIR, 'models', 'nano_model.pkl')
 scaler_path = os.path.join(BASE_DIR, 'models', 'scaler.pkl')
@@ -30,6 +31,7 @@ try:
 except Exception as e:
     print(f"❌ CRITICAL ERROR: Could not load models. {e}")
 
+# 3. DEFINE INPUT SCHEMA
 class NanoInput(BaseModel):
     core_material: str
     size_nm: float
@@ -43,17 +45,18 @@ def health_check():
 @app.post("/predict")
 async def predict(data: NanoInput):
     try:
-        # Calculate S/V Ratio dynamically (ProTox style)
+        # Calculate S/V Ratio dynamically (Essential Nano-QSAR Descriptor)
+        # S/V = 3 / radius
         sv_ratio = 3 / (data.size_nm / 2)
         
-        # Build the input row matching the training features
+        # Build the input row matching the training features exactly
         input_data = {col: [0] for col in feature_cols}
         input_data['size_nm'] = [data.size_nm]
         input_data['zeta_potential_mv'] = [data.zeta_potential_mv]
         input_data['dosage_ug_ml'] = [data.dosage_ug_ml]
         input_data['sv_ratio'] = [sv_ratio]
         
-        # Set the one-hot material
+        # Set the material (One-Hot Encoding)
         mat_col = f"core_material_{data.core_material}"
         if mat_col in input_data:
             input_data[mat_col] = [1]
@@ -62,7 +65,7 @@ async def predict(data: NanoInput):
         df_input = pd.DataFrame(input_data)[feature_cols]
         scaled_input = scaler.transform(df_input)
         
-        prediction = model.predict(scaled_input)[0]
+        prediction = int(model.predict(scaled_input)[0])
         probs = model.predict_proba(scaled_input)[0]
         
         return {
@@ -72,3 +75,9 @@ async def predict(data: NanoInput):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+# For Render's environment
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
