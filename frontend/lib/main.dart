@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'package:file_picker/file_picker.dart'; // Rule 1: Imports at the top!
 
 void main() => runApp(const NanoToxicApp());
 
@@ -24,20 +25,20 @@ class NanoPortal extends StatefulWidget {
 }
 
 class _NanoPortalState extends State<NanoPortal> {
-  // --- Input State ---
+  // --- State Variables ---
   String material = 'Gold';
   double size = 50.0;
   double zeta = 0.0;
   double dosage = 50.0;
-  
-  // --- Output State ---
   String status = "Ready for Assessment";
   String prediction = "--";
   String confidence = "0%";
   String svRatio = "N/A";
   String expertAdvice = "Please input parameters to start analysis.";
   bool isLoading = false;
+  List batchResults = [];
 
+  // --- Individual Prediction ---
   Future<void> runInference() async {
     setState(() => isLoading = true);
     try {
@@ -57,41 +58,85 @@ class _NanoPortalState extends State<NanoPortal> {
         setState(() {
           prediction = data['prediction'];
           confidence = data['confidence'];
-          svRatio = data['descriptors']['sv_ratio'].toString();
+          svRatio = data['descriptors']['sv_ratio'].toStringAsFixed(4);
           status = "Analysis Complete";
           
-          // --- Expert Advice Logic ---
           if (prediction == "Toxic") {
-            if (zeta.abs() > 30) {
-              expertAdvice = "⚠️ High surface charge detected. Suggesting Citrate capping to stabilize the particle.";
-            } else if (size < 20) {
-              expertAdvice = "⚠️ Ultra-small size increases cellular penetration. Suggesting PEGylation to reduce toxicity.";
-            } else {
-              expertAdvice = "⚠️ Toxicity likely concentration-dependent. Review dosage levels for the next assay.";
-            }
+            expertAdvice = size < 20 
+                ? "⚠️ Ultra-small size. Suggesting PEGylation." 
+                : "⚠️ High toxicity. Review dosage.";
           } else {
-            expertAdvice = "✅ Physicochemical profile suggests low biological interference. Proceed with standard protocols.";
+            expertAdvice = "✅ Profile suggests low biological interference.";
           }
         });
       }
     } catch (e) {
-      setState(() => status = "Connection Failed: Server is currently waking up...");
+      setState(() => status = "Connection Failed: Server waking up...");
     } finally {
       setState(() => isLoading = false);
+    }
+  }
+
+  // --- Rule 2: Batch Prediction is now INSIDE the class ---
+  Future<void> uploadCSV() async {
+    FilePickerResult? result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['csv'],
+    );
+
+    if (result != null) {
+      setState(() {
+        isLoading = true;
+        status = "Processing Batch Data...";
+      });
+      
+      try {
+        var request = http.MultipartRequest(
+          'POST', 
+          Uri.parse('https://nanotoxic-api-suhail.onrender.com/predict_batch')
+        );
+        
+        request.files.add(http.MultipartFile.fromBytes(
+          'file', 
+          result.files.first.bytes!, 
+          filename: result.files.first.name
+        ));
+
+        var streamedResponse = await request.send();
+        var response = await http.Response.fromStream(streamedResponse);
+
+        if (response.statusCode == 200) {
+          setState(() {
+            batchResults = jsonDecode(response.body);
+            status = "Batch Analysis Complete (${batchResults.length} Particles)";
+          });
+        }
+      } catch (e) {
+        setState(() => status = "Batch Upload Failed.");
+      } finally {
+        setState(() => isLoading = false);
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text("NanoToxic-ML 3.0 | Research Portal"), centerTitle: true),
+      appBar: AppBar(title: const Text("NanoToxic-ML 4.0 | Research Portal"), centerTitle: true),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(24.0),
         child: Column(
           children: [
             _buildInputCard(),
+            const SizedBox(height: 10),
+            TextButton.icon(
+              onPressed: isLoading ? null : uploadCSV,
+              icon: const Icon(Icons.upload_file),
+              label: const Text("Upload Research CSV (Batch Mode)"),
+            ),
             const SizedBox(height: 20),
             _buildResultCard(),
+            if (batchResults.isNotEmpty) _buildBatchTable(),
           ],
         ),
       ),
@@ -105,27 +150,24 @@ class _NanoPortalState extends State<NanoPortal> {
         padding: const EdgeInsets.all(16.0),
         child: Column(
           children: [
-            const Text("Physicochemical Parameters", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const Text("Parameters", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             DropdownButtonFormField<String>(
-              initialValue: material,
+              value: material,
               items: ['Gold', 'Silver', 'ZincOxide', 'Silica', 'IronOxide']
                   .map((m) => DropdownMenuItem(value: m, child: Text(m)))
                   .toList(),
               onChanged: (v) => setState(() => material = v!),
             ),
-            const SizedBox(height: 10),
-            Text("Particle Size: ${size.round()} nm"),
             Slider(value: size, min: 1, max: 200, onChanged: (v) => setState(() => size = v)),
-            Text("Zeta Potential: ${zeta.round()} mV"),
+            Text("Size: ${size.round()} nm"),
             Slider(value: zeta, min: -100, max: 100, onChanged: (v) => setState(() => zeta = v)),
-            Text("Dosage: ${dosage.round()} ug/mL"),
+            Text("Zeta: ${zeta.round()} mV"),
             Slider(value: dosage, min: 0, max: 500, onChanged: (v) => setState(() => dosage = v)),
+            Text("Dosage: ${dosage.round()} ug/mL"),
             const SizedBox(height: 20),
-            ElevatedButton.icon(
+            ElevatedButton(
               onPressed: isLoading ? null : runInference,
-              icon: const Icon(Icons.science),
-              label: Text(isLoading ? "Analyzing..." : "Run AI Assessment"),
-              style: ElevatedButton.styleFrom(minimumSize: const Size(double.infinity, 50)),
+              child: Text(isLoading ? "Analyzing..." : "Run AI Assessment"),
             ),
           ],
         ),
@@ -135,12 +177,15 @@ class _NanoPortalState extends State<NanoPortal> {
 
   Widget _buildResultCard() {
     return Card(
-      color: prediction == "Toxic" ? Colors.red.withOpacity(0.1) : Colors.green.withOpacity(0.1),
+      // Fixed: Using color values instead of deprecated opacity for v4.0
+      color: prediction == "Toxic" 
+          ? Colors.red.withValues(alpha: 0.1) 
+          : Colors.green.withValues(alpha: 0.1),
       child: Padding(
         padding: const EdgeInsets.all(20.0),
         child: Column(
           children: [
-            Text(status, style: const TextStyle(fontStyle: FontStyle.italic)),
+            Text(status, style: const TextStyle(color: Colors.tealAccent)),
             const Divider(),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceAround,
@@ -151,14 +196,28 @@ class _NanoPortalState extends State<NanoPortal> {
               ],
             ),
             const SizedBox(height: 20),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(color: Colors.black26, borderRadius: BorderRadius.circular(8)),
-              child: Text(expertAdvice, textAlign: TextAlign.center),
-            ),
+            Text(expertAdvice, textAlign: TextAlign.center),
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildBatchTable() {
+    return ListView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      itemCount: batchResults.length,
+      itemBuilder: (context, index) {
+        final item = batchResults[index];
+        return ListTile(
+          title: Text("${item['core_material']} (${item['size_nm']}nm)"),
+          trailing: Text(item['prediction'], style: TextStyle(
+            color: item['prediction'] == "Toxic" ? Colors.red : Colors.green,
+            fontWeight: FontWeight.bold
+          )),
+        );
+      },
     );
   }
 
@@ -169,44 +228,5 @@ class _NanoPortalState extends State<NanoPortal> {
         Text(value, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
       ],
     );
-  }
-}
-
-import 'package:file_picker/file_picker.dart';
-
-Future<void> uploadCSV() async {
-  FilePickerResult? result = await FilePicker.platform.pickFiles(
-    type: FileType.custom,
-    allowedExtensions: ['csv'],
-  );
-
-  if (result != null) {
-    setState(() => isLoading = true);
-    
-    // Create the multipart request
-    var request = http.MultipartRequest(
-      'POST', 
-      Uri.parse('https://nanotoxic-api-suhail.onrender.com/predict_batch')
-    );
-    
-    // Add the file
-    request.files.add(http.MultipartFile.fromBytes(
-      'file', 
-      result.files.first.bytes!, 
-      filename: result.files.first.name
-    ));
-
-    var streamedResponse = await request.send();
-    var response = await http.Response.fromStream(streamedResponse);
-
-    if (response.statusCode == 200) {
-      List batchData = jsonDecode(response.body);
-      // Here we would navigate to a new screen or show a table
-      print("Batch processed: ${batchData.length} particles");
-      setState(() {
-        status = "Batch processed: ${batchData.length} particles";
-      });
-    }
-    setState(() => isLoading = false);
   }
 }
