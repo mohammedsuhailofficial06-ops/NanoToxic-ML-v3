@@ -107,7 +107,7 @@ class _NanoPortalState extends State<NanoPortal> {
           children: [
             const Text("Physicochemical Parameters", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             DropdownButtonFormField<String>(
-              value: material,
+              initialValue: material,
               items: ['Gold', 'Silver', 'ZincOxide', 'Silica', 'IronOxide']
                   .map((m) => DropdownMenuItem(value: m, child: Text(m)))
                   .toList(),
@@ -169,5 +169,44 @@ class _NanoPortalState extends State<NanoPortal> {
         Text(value, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
       ],
     );
+  }
+}
+
+import 'package:file_picker/file_picker.dart';
+
+Future<void> uploadCSV() async {
+  FilePickerResult? result = await FilePicker.platform.pickFiles(
+    type: FileType.custom,
+    allowedExtensions: ['csv'],
+  );
+
+  if (result != null) {
+    setState(() => isLoading = true);
+    
+    // Create the multipart request
+    var request = http.MultipartRequest(
+      'POST', 
+      Uri.parse('https://nanotoxic-api-suhail.onrender.com/predict_batch')
+    );
+    
+    // Add the file
+    request.files.add(http.MultipartFile.fromBytes(
+      'file', 
+      result.files.first.bytes!, 
+      filename: result.files.first.name
+    ));
+
+    var streamedResponse = await request.send();
+    var response = await http.Response.fromStream(streamedResponse);
+
+    if (response.statusCode == 200) {
+      List batchData = jsonDecode(response.body);
+      // Here we would navigate to a new screen or show a table
+      print("Batch processed: ${batchData.length} particles");
+      setState(() {
+        status = "Batch processed: ${batchData.length} particles";
+      });
+    }
+    setState(() => isLoading = false);
   }
 }
