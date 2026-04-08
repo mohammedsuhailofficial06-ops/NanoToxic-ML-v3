@@ -81,3 +81,51 @@ if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
+
+from fastapi import UploadFile, File
+import io
+
+@app.post("/predict_batch")
+async def predict_batch(file: UploadFile = File(...)):
+    try:
+        # Read the uploaded CSV
+        contents = await file.read()
+        df = pd.read_csv(io.BytesIO(contents))
+        
+        # Verify required columns exist
+        required = ["core_material", "size_nm", "zeta_potential_mv", "dosage_ug_ml"]
+        if not all(col in df.columns for col in required):
+            return {"error": f"CSV must contain columns: {required}"}
+
+        # 1. Feature Engineering: Calculate S/V Ratio for the whole batch
+        df['sv_ratio'] = 3 / (df['size_nm'] / 2)
+
+        # 2. Pre-process the data (One-Hot Encoding and Scaling)
+        # Create a template matching your feature_cols
+        results = []
+        for _, row in df.iterrows():
+            input_row = {col: [0] for col in feature_cols}
+            input_row['size_nm'] = [row['size_nm']]
+            input_row['zeta_potential_mv'] = [row['zeta_potential_mv']]
+            input_row['dosage_ug_ml'] = [row['dosage_ug_ml']]
+            input_row['sv_ratio'] = [row['sv_ratio']]
+
+            mat_col = f"core_material_{row['core_material']}"
+            if mat_col in input_row:
+                input_row[mat_col] = [1]
+
+            df_input = pd.DataFrame(input_row)[feature_cols]
+            scaled_input = scaler.transform(df_input)
+            
+            # Predict
+            pred = model.predict(scaled_input)[0]
+            results.append("Toxic" if pred == 1 else "Safe")
+
+        # 3. Add predictions back to the dataframe
+        df['prediction'] = results
+        
+        # Return as a list of dictionaries for Flutter to read
+        return df.to_dict(orient="records")
+
+    except Exception as e:
+        return {"error": str(e)}
